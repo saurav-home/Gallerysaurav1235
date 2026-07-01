@@ -53,8 +53,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -105,6 +109,8 @@ fun MainScreen(
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
     val rawMedia by viewModel.rawMediaItems.collectAsState()
+    val fancyBlur by viewModel.fancyBlur.collectAsState()
+    val liquidGlassMode by viewModel.liquidGlassMode.collectAsState()
 
     var isBottomBarVisible by remember { mutableStateOf(true) }
     var activeSubScreen by remember { mutableStateOf<String?>(null) }
@@ -156,6 +162,16 @@ fun MainScreen(
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
+            // Immersive Status Bar Blur Scrim
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .glassyBlur(enabled = fancyBlur, radius = 25f)
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
+                    .zIndex(10f)
+            )
+
             AnimatedContent(
                 targetState = selectedTab,
                 transitionSpec = {
@@ -194,37 +210,76 @@ fun MainScreen(
             ) {
                 Surface(
                     shape = RoundedCornerShape(32.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                    tonalElevation = 6.dp,
+                    color = if (liquidGlassMode) {
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.10f)
+                    } else {
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                    },
+                    tonalElevation = if (liquidGlassMode) 0.dp else 6.dp,
                     border = BorderStroke(
-                        width = 1.dp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                        width = if (liquidGlassMode) 1.5.dp else 1.dp,
+                        color = if (liquidGlassMode) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.60f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(64.dp)
-                        .shadow(12.dp, RoundedCornerShape(32.dp))
+                        .shadow(if (liquidGlassMode) 4.dp else 12.dp, RoundedCornerShape(32.dp))
+                        .glassyBlur(enabled = fancyBlur, radius = 25f)
                         .testTag("bottom_nav")
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
+                        if (liquidGlassMode) {
+                            // Active runtime gradient overlay mimicking light reflection
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = 0.15f),
+                                                Color.Transparent,
+                                                Color.White.copy(alpha = 0.05f)
+                                            )
+                                        )
+                                    )
+                            )
+                        }
+
                         // Sliding Highlight Pill
+                        val targetBias = when (selectedTab) {
+                            0 -> -0.8f
+                            1 -> 0f
+                            else -> 0.8f
+                        }
                         val indicatorBias by animateFloatAsState(
-                            targetValue = when (selectedTab) {
-                                0 -> -0.8f
-                                1 -> 0f
-                                else -> 0.8f
-                            },
-                            animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
+                            targetValue = targetBias,
+                            animationSpec = spring(
+                                dampingRatio = if (liquidGlassMode) Spring.DampingRatioMediumBouncy else Spring.DampingRatioLowBouncy,
+                                stiffness = if (liquidGlassMode) Spring.StiffnessLow else Spring.StiffnessMediumLow
+                            ),
                             label = "nav_highlight"
                         )
+
+                        // Stretch factor based on displacement to mimic a liquid droplet
+                        val displacement = androidx.compose.ui.util.lerp(0f, 1f, Math.abs(indicatorBias - targetBias))
+                        val stretchWidth = if (liquidGlassMode) {
+                            0.28f * (1f + displacement * 0.6f)
+                        } else {
+                            0.28f
+                        }
+                        val cornerRadius = if (liquidGlassMode) {
+                            (20f - displacement * 10f).dp
+                        } else {
+                            20.dp
+                        }
                         
                         Box(
                             modifier = Modifier
                                 .align(BiasAlignment(indicatorBias, 0f))
                                 .fillMaxHeight()
-                                .fillMaxWidth(0.28f)
+                                .fillMaxWidth(stretchWidth)
                                 .padding(vertical = 8.dp)
-                                .clip(RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(cornerRadius))
                                 .background(MaterialTheme.colorScheme.primaryContainer)
                         )
 
@@ -356,6 +411,8 @@ fun PhotosTab(
     val columnCount by viewModel.columnCount.collectAsState()
     val gridMode by viewModel.gridMode.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val fancyBlur by viewModel.fancyBlur.collectAsState()
+    val liquidGlassMode by viewModel.liquidGlassMode.collectAsState()
     var showProfileDialog by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -394,6 +451,8 @@ fun PhotosTab(
             searchQuery = searchQuery,
             onSearchQueryChange = { viewModel.setSearchQuery(it) },
             onProfileClick = { showProfileDialog = true },
+            fancyBlur = fancyBlur,
+            liquidGlassMode = liquidGlassMode,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
@@ -739,25 +798,59 @@ fun FloatingSearchBar(
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     onProfileClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fancyBlur: Boolean = true,
+    liquidGlassMode: Boolean = false
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    val borderColor = if (liquidGlassMode) {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.60f)
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    }
+    val borderWidth = if (liquidGlassMode) 1.5.dp else 1.dp
+    val containerColor = if (liquidGlassMode) {
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.10f)
+    } else {
+        MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp).copy(alpha = if (fancyBlur) 0.85f else 1f)
+    }
+
     Surface(
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp),
-        tonalElevation = 3.dp,
+        color = containerColor,
+        border = BorderStroke(borderWidth, borderColor),
+        tonalElevation = if (liquidGlassMode) 0.dp else 3.dp,
         modifier = modifier
             .fillMaxWidth()
             .height(56.dp)
+            .glassyBlur(enabled = fancyBlur, radius = 25f)
             .testTag("floating_search_bar")
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 8.dp)
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (liquidGlassMode) {
+                // Runtime gradient overlay mimicking light reflection
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.15f),
+                                    Color.Transparent,
+                                    Color.White.copy(alpha = 0.05f)
+                                )
+                            )
+                        )
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp)
+            ) {
             Icon(
                 imageVector = Icons.Default.Search,
                 contentDescription = "Search icon",
@@ -826,6 +919,7 @@ fun FloatingSearchBar(
             Spacer(modifier = Modifier.width(4.dp))
         }
     }
+}
 }
 
 @Composable
@@ -2022,5 +2116,22 @@ fun TrashScreen(
                 }
             }
         }
+    }
+}
+
+fun Modifier.glassyBlur(enabled: Boolean = true, radius: Float = 25f): Modifier {
+    if (!enabled) return this
+    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        this.graphicsLayer {
+            val renderEffect = RenderEffect.createBlurEffect(
+                radius,
+                radius,
+                Shader.TileMode.DECAL
+            )
+            this.renderEffect = renderEffect.asComposeRenderEffect()
+            clip = true
+        }
+    } else {
+        this.blur(radius.dp)
     }
 }

@@ -105,6 +105,9 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private val _fancyBlur = MutableStateFlow(prefs.getBoolean("fancy_blur", true))
     val fancyBlur: StateFlow<Boolean> = _fancyBlur.asStateFlow()
 
+    private val _liquidGlassMode = MutableStateFlow(prefs.getBoolean("liquid_glass_mode", false))
+    val liquidGlassMode: StateFlow<Boolean> = _liquidGlassMode.asStateFlow()
+
     private val _autoContrast = MutableStateFlow(prefs.getBoolean("auto_contrast", false))
     val autoContrast: StateFlow<Boolean> = _autoContrast.asStateFlow()
 
@@ -538,6 +541,11 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     fun setFancyBlur(enabled: Boolean) {
         _fancyBlur.value = enabled
         prefs.edit().putBoolean("fancy_blur", enabled).apply()
+    }
+
+    fun setLiquidGlassMode(enabled: Boolean) {
+        _liquidGlassMode.value = enabled
+        prefs.edit().putBoolean("liquid_glass_mode", enabled).apply()
     }
 
     fun setAutoContrast(enabled: Boolean) {

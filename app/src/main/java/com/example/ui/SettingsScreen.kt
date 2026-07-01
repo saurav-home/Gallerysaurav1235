@@ -440,6 +440,7 @@ fun AppearanceSettingsPage(
     val autoContrast by viewModel.autoContrast.collectAsState()
     val animateMediaItems by viewModel.animateMediaItems.collectAsState()
     val useSystemFont by viewModel.useSystemFont.collectAsState()
+    val liquidGlassMode by viewModel.liquidGlassMode.collectAsState()
 
     fun triggerHaptic() {
         if (viewModel.isVibrationEnabled.value) {
@@ -603,6 +604,17 @@ fun AppearanceSettingsPage(
                         onCheckedChange = {
                             triggerHaptic()
                             viewModel.setAnimateMediaItems(it)
+                        }
+                    )
+                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 16.dp))
+                    SubPreferenceToggle(
+                        title = "Liquid Glass Interface Mode",
+                        subtitle = "Enable premium glassmorphism glass effects, spring physics, dynamic droplet indicators, and surface reflections",
+                        icon = Icons.Outlined.Opacity,
+                        checked = liquidGlassMode,
+                        onCheckedChange = {
+                            triggerHaptic()
+                            viewModel.setLiquidGlassMode(it)
                         }
                     )
                 }

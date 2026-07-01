@@ -6,6 +6,10 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.EaseInOutCubic
+import androidx.compose.animation.core.EaseInOutQuart
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -197,13 +201,15 @@ fun MainScreen(
             AnimatedContent(
                 targetState = selectedTab,
                 transitionSpec = {
-                    if (targetState > initialState) {
-                        (slideInHorizontally(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn())
-                            .togetherWith(slideOutHorizontally(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) { -it } + fadeOut())
-                    } else {
-                        (slideInHorizontally(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) { -it } + fadeIn())
-                            .togetherWith(slideOutHorizontally(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) { it } + fadeOut())
-                    }
+                    val slideDirection = if (targetState > initialState) 1 else -1
+                    (slideInHorizontally(animationSpec = tween(400, easing = EaseInOutCubic)) { slideDirection * it } +
+                     scaleIn(initialScale = 0.94f, animationSpec = tween(400, easing = EaseInOutCubic)) +
+                     fadeIn(animationSpec = tween(400, easing = EaseInOutCubic)))
+                    .togetherWith(
+                        slideOutHorizontally(animationSpec = tween(400, easing = EaseInOutCubic)) { -slideDirection * it } +
+                        scaleOut(targetScale = 0.94f, animationSpec = tween(400, easing = EaseInOutCubic)) +
+                        fadeOut(animationSpec = tween(400, easing = EaseInOutCubic))
+                    )
                 },
                 label = "tab_transition",
                 modifier = Modifier.fillMaxSize()

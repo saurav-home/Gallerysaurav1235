@@ -434,7 +434,6 @@ fun AppearanceSettingsPage(
     val haptic = LocalHapticFeedback.current
     val colorPalette by viewModel.colorPalette.collectAsState()
     val followSystemTheme by viewModel.followSystemTheme.collectAsState()
-    val useDarkMode by viewModel.useDarkMode.collectAsState()
     val useAmoledMode by viewModel.useAmoledMode.collectAsState()
     val fancyBlur by viewModel.fancyBlur.collectAsState()
     val autoContrast by viewModel.autoContrast.collectAsState()
@@ -540,18 +539,6 @@ fun AppearanceSettingsPage(
                             triggerHaptic()
                             viewModel.setFollowSystemTheme(it)
                         }
-                    )
-                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 16.dp))
-                    SubPreferenceToggle(
-                        title = "Use Dark Mode",
-                        subtitle = "Enable night styling (overridden by system sync if active)",
-                        icon = Icons.Outlined.DarkMode,
-                        checked = useDarkMode,
-                        onCheckedChange = {
-                            triggerHaptic()
-                            viewModel.setUseDarkMode(it)
-                        },
-                        enabled = !followSystemTheme
                     )
                     Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 16.dp))
                     SubPreferenceToggle(

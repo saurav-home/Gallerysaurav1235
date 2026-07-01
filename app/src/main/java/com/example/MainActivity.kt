@@ -54,13 +54,13 @@ class MainActivity : FragmentActivity() {
         
         setContent {
             val viewModel: GalleryViewModel = viewModel()
-            val themeMode by viewModel.themeMode.collectAsState()
+            val followSystemTheme by viewModel.followSystemTheme.collectAsState()
             val colorPalette by viewModel.colorPalette.collectAsState()
             val useAmoledMode by viewModel.useAmoledMode.collectAsState()
-            val isDark = when (themeMode) {
-                "light" -> false
-                "dark" -> true
-                else -> androidx.compose.foundation.isSystemInDarkTheme()
+            val isDark = if (followSystemTheme) {
+                androidx.compose.foundation.isSystemInDarkTheme()
+            } else {
+                false
             }
 
             LaunchedEffect(isDark, useAmoledMode) {

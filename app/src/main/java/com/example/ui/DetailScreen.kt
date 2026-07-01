@@ -10,8 +10,13 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,6 +47,9 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import com.example.model.MediaItem
 import com.example.viewmodel.GalleryViewModel
 import kotlinx.coroutines.launch
@@ -83,8 +91,12 @@ fun DetailScreen(
     modifier: Modifier = Modifier
 ) {
     val rawMediaItems by viewModel.rawMediaItems.collectAsState()
-    val mediaItem = remember(rawMediaItems, itemId) {
-        rawMediaItems.firstOrNull { it.id == itemId }
+    val initialPage = remember(rawMediaItems, itemId) {
+        rawMediaItems.indexOfFirst { it.id == itemId }.coerceAtLeast(0)
+    }
+    val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { rawMediaItems.size })
+    val mediaItem = remember(rawMediaItems, pagerState.currentPage) {
+        rawMediaItems.getOrNull(pagerState.currentPage)
     }
 
     if (mediaItem == null) {
@@ -98,8 +110,8 @@ fun DetailScreen(
     val scope = rememberCoroutineScope()
     
     val favoriteIds by viewModel.favoriteIds.collectAsState()
-    val isFavorite = remember(favoriteIds, itemId) {
-        favoriteIds.contains(itemId)
+    val isFavorite = remember(favoriteIds, mediaItem) {
+        mediaItem?.let { favoriteIds.contains(it.id) } ?: false
     }
 
     // Immersive mode: toggles toolbars visibility on single tap
@@ -157,6 +169,13 @@ fun DetailScreen(
     var offset by remember { mutableStateOf(Offset.Zero) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
+    LaunchedEffect(pagerState.currentPage) {
+        scale = 1f
+        offset = Offset.Zero
+        dragOffsetY = 0f
+        rotationAngleDetail = 0f
+    }
+
     val density = androidx.compose.ui.platform.LocalDensity.current
 
     val dragProgress = (dragOffsetY.coerceIn(-600f, 600f).absoluteValue / 600f)
@@ -167,7 +186,7 @@ fun DetailScreen(
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = finalAlpha))
+            .background(MaterialTheme.colorScheme.background.copy(alpha = finalAlpha))
             .testTag("detail_screen")
     ) {
         val screenWidthPx = with(density) { maxWidth.toPx() }
@@ -206,115 +225,104 @@ fun DetailScreen(
         val finalTranslationX = currentTranslationX + offset.x
         val finalTranslationY = currentTranslationY + offset.y + if (scale == 1f) dragOffsetY else 0f
 
-        // Main Viewer (Image or Video) with animated bounds & transitions
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(mediaItem.isVideo) {
-                    if (mediaItem.isVideo) {
-                        detectTapGestures(
-                            onTap = { showToolbars = !showToolbars }
-                        )
-                    } else {
-                        detectTapGestures(
-                            onDoubleTap = { tapOffset ->
-                                if (scale > 1f) {
-                                    scale = 1f
-                                    offset = Offset.Zero
+        // HorizontalPager for swiping left/right between previous and next photos/videos
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = (scale == 1f)
+        ) { page ->
+            val pageItem = rawMediaItems.getOrNull(page)
+            if (pageItem != null) {
+                val isCurrent = page == pagerState.currentPage
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(pageItem.isVideo, isCurrent) {
+                            if (isCurrent) {
+                                if (pageItem.isVideo) {
+                                    detectTapGestures(
+                                        onTap = { showToolbars = !showToolbars }
+                                    )
                                 } else {
-                                    scale = 3f
-                                    offset = Offset.Zero
+                                    detectTapGestures(
+                                        onDoubleTap = { tapOffset ->
+                                            if (scale > 1f) {
+                                                scale = 1f
+                                                offset = Offset.Zero
+                                            } else {
+                                                scale = 3f
+                                                offset = Offset.Zero
+                                            }
+                                        },
+                                        onTap = { showToolbars = !showToolbars }
+                                    )
                                 }
-                            },
-                            onTap = { showToolbars = !showToolbars }
-                        )
-                    }
-                }
-                .pointerInput(scale, mediaItem.isVideo) {
-                    if (!mediaItem.isVideo) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(1f, 5f)
-                            if (scale > 1f) {
-                                val maxOffsetX = (scale - 1) * size.width / 2
-                                val maxOffsetY = (scale - 1) * size.height / 2
-                                val newX = (offset.x + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
-                                val newY = (offset.y + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
-                                offset = Offset(newX, newY)
-                            } else {
-                                offset = Offset.Zero
                             }
                         }
-                    }
-                }
-                .pointerInput(scale) {
-                    if (scale == 1f) {
-                        detectDragGestures(
-                            onDragEnd = {
-                                val thresholdPx = 150f * density.density
-                                if (dragOffsetY > thresholdPx) {
-                                    // Smoothly collapse back to grid item bounds (Swipe Down to Dismiss)
-                                    scope.launch {
-                                        androidx.compose.animation.core.animate(
-                                            initialValue = animationProgress,
-                                            targetValue = 0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMedium
-                                            )
-                                        ) { value, _ ->
-                                            animationProgress = value
+                        .pointerInput(scale, pageItem.isVideo, isCurrent) {
+                            if (!pageItem.isVideo && isCurrent) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    var isZooming = false
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val pointersCount = event.changes.size
+                                        val shouldConsume = scale > 1f || pointersCount > 1 || isZooming
+                                        
+                                        if (shouldConsume) {
+                                            val zoomFactor = event.calculateZoom()
+                                            val panDelta = event.calculatePan()
+                                            
+                                            if (pointersCount > 1 && zoomFactor != 1f) {
+                                                isZooming = true
+                                            }
+                                            
+                                            scale = (scale * zoomFactor).coerceIn(1f, 5f)
+                                            if (scale > 1f) {
+                                                val maxOffsetX = (scale - 1) * size.width / 2
+                                                val maxOffsetY = (scale - 1) * size.height / 2
+                                                val newX = (offset.x + panDelta.x).coerceIn(-maxOffsetX, maxOffsetX)
+                                                val newY = (offset.y + panDelta.y).coerceIn(-maxOffsetY, maxOffsetY)
+                                                offset = Offset(newX, newY)
+                                                
+                                                event.changes.forEach { it.consume() }
+                                            } else {
+                                                offset = Offset.Zero
+                                                isZooming = false
+                                            }
                                         }
-                                        onBack()
-                                    }
-                                } else if (dragOffsetY < -thresholdPx) {
-                                    // Swipe Up to reveal EXIF Metadata Sheet!
-                                    dragOffsetY = 0f
-                                    showExifSheet = true
-                                } else {
-                                    // Spring back to center
-                                    scope.launch {
-                                        androidx.compose.animation.core.animate(
-                                            initialValue = dragOffsetY,
-                                            targetValue = 0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioLowBouncy,
-                                                stiffness = Spring.StiffnessMediumLow
-                                            )
-                                        ) { value, _ ->
-                                            dragOffsetY = value
-                                        }
-                                    }
+                                    } while (event.changes.any { it.pressed })
                                 }
-                            },
-                            onDragCancel = { dragOffsetY = 0f },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                dragOffsetY += dragAmount.y
                             }
+                        }
+                        .graphicsLayer {
+                            if (isCurrent) {
+                                scaleX = finalScaleX
+                                scaleY = finalScaleY
+                                translationX = finalTranslationX
+                                translationY = finalTranslationY
+                                rotationZ = rotationAngleDetail
+                            }
+                        }
+                ) {
+                    if (pageItem.isVideo) {
+                        VideoPlayer(
+                            uriString = pageItem.uri.toString(),
+                            showControls = showToolbars,
+                            onToggleControls = { showToolbars = !showToolbars },
+                            onIsPlayingChanged = { isPlaying ->
+                                showToolbars = !isPlaying
+                            }
+                        )
+                    } else {
+                        AsyncImage(
+                            model = pageItem.uri,
+                            contentDescription = pageItem.name,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
                 }
-                .graphicsLayer {
-                    scaleX = finalScaleX
-                    scaleY = finalScaleY
-                    translationX = finalTranslationX
-                    translationY = finalTranslationY
-                    rotationZ = rotationAngleDetail
-                }
-        ) {
-            if (mediaItem.isVideo) {
-                VideoPlayer(
-                    uriString = mediaItem.uri.toString(),
-                    showControls = showToolbars,
-                    onToggleControls = { showToolbars = !showToolbars }
-                )
-            } else {
-                AsyncImage(
-                    model = mediaItem.uri,
-                    contentDescription = mediaItem.name,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
             }
         }
 
@@ -821,6 +829,7 @@ fun VideoPlayer(
     uriString: String,
     showControls: Boolean,
     onToggleControls: () -> Unit,
+    onIsPlayingChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -867,6 +876,7 @@ fun VideoPlayer(
                     }
                     setOnCompletionListener {
                         isPlaying = false
+                        onIsPlayingChanged(false)
                     }
                     videoViewRef = this
                 }
@@ -917,9 +927,11 @@ fun VideoPlayer(
                                 if (isPlaying) {
                                     view.pause()
                                     isPlaying = false
+                                    onIsPlayingChanged(false)
                                 } else {
                                     view.start()
                                     isPlaying = true
+                                    onIsPlayingChanged(true)
                                 }
                             }
                         },
@@ -1029,6 +1041,8 @@ fun TopAppBarOverlay(
     onVaultClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val barColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+    val contentColor = MaterialTheme.colorScheme.onSurface
     Box(
         modifier = modifier
             .statusBarsPadding()
@@ -1039,11 +1053,11 @@ fun TopAppBarOverlay(
     ) {
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = Color.Black.copy(alpha = 0.65f),
+            color = barColor,
             tonalElevation = 6.dp,
             border = BorderStroke(
                 width = 1.dp,
-                color = Color.White.copy(alpha = 0.12f)
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
             ),
             modifier = Modifier
                 .height(48.dp)
@@ -1062,7 +1076,7 @@ fun TopAppBarOverlay(
                     Icon(
                         imageVector = Icons.Default.ArrowBack,
                         contentDescription = "Go back",
-                        tint = Color.White,
+                        tint = contentColor,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -1070,7 +1084,7 @@ fun TopAppBarOverlay(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White,
+                    color = contentColor,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1083,7 +1097,7 @@ fun TopAppBarOverlay(
                         Icon(
                             imageVector = Icons.Outlined.Lock,
                             contentDescription = "Move to Secure Vault",
-                            tint = Color.White,
+                            tint = contentColor,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -1091,7 +1105,7 @@ fun TopAppBarOverlay(
                         Icon(
                             imageVector = Icons.Outlined.Info,
                             contentDescription = "Details EXIF",
-                            tint = Color.White,
+                            tint = contentColor,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -1106,7 +1120,7 @@ fun BottomBarAction(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
-    iconColor: Color = Color.White,
+    iconColor: Color = MaterialTheme.colorScheme.onSurface,
     scale: Float = 1f
 ) {
     Column(
@@ -1130,7 +1144,7 @@ fun BottomBarAction(
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = label,
-            color = Color.White.copy(alpha = 0.9f),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
             style = MaterialTheme.typography.labelSmall,
             fontSize = 10.sp,
             fontWeight = FontWeight.Medium
@@ -1150,6 +1164,8 @@ fun BottomActionBarOverlay(
     onMoreClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val barColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+    val defaultIconColor = MaterialTheme.colorScheme.onSurface
     Box(
         modifier = modifier
             .navigationBarsPadding()
@@ -1160,11 +1176,11 @@ fun BottomActionBarOverlay(
     ) {
         Surface(
             shape = RoundedCornerShape(32.dp),
-            color = Color.Black.copy(alpha = 0.75f),
+            color = barColor,
             tonalElevation = 8.dp,
             border = BorderStroke(
                 width = 1.dp,
-                color = Color.White.copy(alpha = 0.15f)
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
             ),
             modifier = Modifier
                 .height(72.dp)
@@ -1181,7 +1197,8 @@ fun BottomActionBarOverlay(
                 BottomBarAction(
                     icon = Icons.Outlined.Share,
                     label = "Share",
-                    onClick = onShareClick
+                    onClick = onShareClick,
+                    iconColor = defaultIconColor
                 )
 
                 // Edit
@@ -1189,7 +1206,8 @@ fun BottomActionBarOverlay(
                     BottomBarAction(
                         icon = Icons.Outlined.Edit,
                         label = "Edit",
-                        onClick = onEditClick
+                        onClick = onEditClick,
+                        iconColor = defaultIconColor
                     )
                 }
 
@@ -1198,7 +1216,7 @@ fun BottomActionBarOverlay(
                     icon = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                     label = "Favorite",
                     onClick = onFavoriteToggle,
-                    iconColor = if (isFavorite) Color.Red else Color.White,
+                    iconColor = if (isFavorite) Color.Red else defaultIconColor,
                     scale = heartScale
                 )
 
@@ -1206,14 +1224,16 @@ fun BottomActionBarOverlay(
                 BottomBarAction(
                     icon = Icons.Outlined.Delete,
                     label = "Delete",
-                    onClick = onDeleteClick
+                    onClick = onDeleteClick,
+                    iconColor = defaultIconColor
                 )
 
                 // More
                 BottomBarAction(
                     icon = Icons.Default.MoreVert,
                     label = "More",
-                    onClick = onMoreClick
+                    onClick = onMoreClick,
+                    iconColor = defaultIconColor
                 )
             }
         }

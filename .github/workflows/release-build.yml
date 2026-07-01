@@ -24,6 +24,10 @@ jobs:
       - name: Setup Gradle Cache
         uses: gradle/actions/setup-gradle@v3
 
+      # THE FIX: This command creates the missing gradlew files automatically!
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper
+
       - name: Grant Execute Permission to Gradle Wrapper
         run: chmod +x gradlew
 
@@ -36,3 +40,4 @@ jobs:
           name: Prism-Unsigned-Release-APK
           path: app/build/outputs/apk/release/app-release-unsigned.apk
           retention-days: 7
+

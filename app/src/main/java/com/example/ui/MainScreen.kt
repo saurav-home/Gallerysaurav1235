@@ -93,6 +93,7 @@ import coil.request.ImageRequest
 import com.example.model.MediaItem
 import com.example.viewmodel.GalleryUiState
 import com.example.viewmodel.GalleryViewModel
+import androidx.activity.compose.BackHandler
 
 sealed class GridItem {
     data class Header(val date: String) : GridItem()
@@ -114,6 +115,19 @@ fun MainScreen(
 
     var isBottomBarVisible by remember { mutableStateOf(true) }
     var activeSubScreen by remember { mutableStateOf<String?>(null) }
+    var activeCategoryTitle by remember { mutableStateOf<String?>(null) }
+    var activeCategoryItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+
+    BackHandler(enabled = activeSubScreen != null || activeCategoryTitle != null || selectedTab != 0) {
+        if (activeCategoryTitle != null) {
+            activeCategoryTitle = null
+            activeCategoryItems = emptyList()
+        } else if (activeSubScreen != null) {
+            activeSubScreen = null
+        } else if (selectedTab != 0) {
+            viewModel.setTab(0)
+        }
+    }
 
     val context = LocalContext.current
     val vaultTriggerShortcut by viewModel.vaultTriggerShortcut.collectAsState()
@@ -162,14 +176,22 @@ fun MainScreen(
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Immersive Status Bar Blur Scrim
+            // Immersive Top Blur Scrim (Status Bar & Search Bar Background)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(110.dp)
                     .glassyBlur(enabled = fancyBlur, radius = 25f)
-                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
-                    .zIndex(10f)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.surface.copy(alpha = if (fancyBlur) 0.85f else 1f),
+                                MaterialTheme.colorScheme.surface.copy(alpha = if (fancyBlur) 0.40f else 0.80f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .zIndex(5f)
             )
 
             AnimatedContent(
@@ -188,10 +210,38 @@ fun MainScreen(
             ) { targetTab ->
                 when (targetTab) {
                     0 -> PhotosTab(viewModel, onMediaClick, onSettingsClick)
-                    1 -> AlbumsTab(viewModel, onMediaClick, onOpenVault = { activeSubScreen = "vault" }, onOpenTrash = { activeSubScreen = "trash" })
+                    1 -> AlbumsTab(
+                        viewModel = viewModel,
+                        onMediaClick = onMediaClick,
+                        onCategoryClick = { title, items ->
+                            activeCategoryTitle = title
+                            activeCategoryItems = items
+                        },
+                        onOpenVault = { activeSubScreen = "vault" },
+                        onOpenTrash = { activeSubScreen = "trash" }
+                    )
                     2 -> SearchTab(viewModel, onMediaClick)
                 }
             }
+
+            // Immersive Bottom Blur Scrim
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(112.dp)
+                    .glassyBlur(enabled = fancyBlur, radius = 25f)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                MaterialTheme.colorScheme.surface.copy(alpha = if (fancyBlur) 0.40f else 0.80f),
+                                MaterialTheme.colorScheme.surface.copy(alpha = if (fancyBlur) 0.85f else 1f)
+                            )
+                        )
+                    )
+                    .zIndex(5f)
+            )
 
             // Centralized Floating Bottom Pill Navigation Bar (Global UI)
             val bottomBarOffset by animateDpAsState(
@@ -207,13 +257,14 @@ fun MainScreen(
                     .navigationBarsPadding()
                     .padding(bottom = 16.dp)
                     .padding(horizontal = 24.dp)
+                    .zIndex(10f)
             ) {
                 Surface(
                     shape = RoundedCornerShape(32.dp),
                     color = if (liquidGlassMode) {
                         MaterialTheme.colorScheme.surface.copy(alpha = 0.10f)
                     } else {
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
                     },
                     tonalElevation = if (liquidGlassMode) 0.dp else 6.dp,
                     border = BorderStroke(
@@ -222,12 +273,11 @@ fun MainScreen(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(64.dp)
+                        .height(72.dp)
                         .shadow(if (liquidGlassMode) 4.dp else 12.dp, RoundedCornerShape(32.dp))
-                        .glassyBlur(enabled = fancyBlur, radius = 25f)
                         .testTag("bottom_nav")
                 ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         if (liquidGlassMode) {
                             // Active runtime gradient overlay mimicking light reflection
                             Box(
@@ -245,47 +295,59 @@ fun MainScreen(
                             )
                         }
 
+                        val tabWidth = maxWidth / 3
+
                         // Sliding Highlight Pill
-                        val targetBias = when (selectedTab) {
-                            0 -> -0.8f
-                            1 -> 0f
-                            else -> 0.8f
+                        val targetOffset by remember(selectedTab, tabWidth) {
+                            derivedStateOf {
+                                when (selectedTab) {
+                                    0 -> 0.dp
+                                    1 -> tabWidth
+                                    else -> tabWidth * 2
+                                }
+                            }
                         }
-                        val indicatorBias by animateFloatAsState(
-                            targetValue = targetBias,
+
+                        val indicatorOffset by animateDpAsState(
+                            targetValue = targetOffset,
                             animationSpec = spring(
                                 dampingRatio = if (liquidGlassMode) Spring.DampingRatioMediumBouncy else Spring.DampingRatioLowBouncy,
                                 stiffness = if (liquidGlassMode) Spring.StiffnessLow else Spring.StiffnessMediumLow
                             ),
-                            label = "nav_highlight"
+                            label = "nav_highlight_offset"
                         )
 
                         // Stretch factor based on displacement to mimic a liquid droplet
-                        val displacement = androidx.compose.ui.util.lerp(0f, 1f, Math.abs(indicatorBias - targetBias))
+                        val displacement = if (tabWidth.value > 0f) {
+                            Math.abs((indicatorOffset - targetOffset).value) / tabWidth.value
+                        } else {
+                            0f
+                        }
+
                         val stretchWidth = if (liquidGlassMode) {
-                            0.28f * (1f + displacement * 0.6f)
+                            tabWidth * (1f + displacement * 0.4f)
                         } else {
-                            0.28f
+                            tabWidth
                         }
+
                         val cornerRadius = if (liquidGlassMode) {
-                            (20f - displacement * 10f).dp
+                            (24f - displacement * 10f).coerceIn(12f, 24f).dp
                         } else {
-                            20.dp
+                            24.dp
                         }
-                        
+
                         Box(
                             modifier = Modifier
-                                .align(BiasAlignment(indicatorBias, 0f))
+                                .offset(x = indicatorOffset - if (liquidGlassMode) (stretchWidth - tabWidth) / 2 else 0.dp)
                                 .fillMaxHeight()
-                                .fillMaxWidth(stretchWidth)
-                                .padding(vertical = 8.dp)
+                                .width(stretchWidth)
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
                                 .clip(RoundedCornerShape(cornerRadius))
                                 .background(MaterialTheme.colorScheme.primaryContainer)
                         )
 
                         Row(
                             modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             FloatingNavTabItem(
@@ -341,6 +403,26 @@ fun MainScreen(
             ) {
                 TrashScreen(viewModel, onBack = { activeSubScreen = null })
             }
+
+            // Category / Album Detail Grid Overlay Screen
+            AnimatedVisibility(
+                visible = activeCategoryTitle != null,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { it })
+            ) {
+                activeCategoryTitle?.let { title ->
+                    CategoryGalleryScreen(
+                        title = title,
+                        items = activeCategoryItems,
+                        viewModel = viewModel,
+                        onMediaClick = onMediaClick,
+                        onBack = {
+                            activeCategoryTitle = null
+                            activeCategoryItems = emptyList()
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -357,7 +439,7 @@ fun RowScope.FloatingNavTabItem(
     tag: String
 ) {
     val contentColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        targetValue = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "tab_color"
     )
@@ -390,7 +472,7 @@ fun RowScope.FloatingNavTabItem(
                 tint = contentColor,
                 modifier = Modifier.size(24.dp)
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = label,
                 color = contentColor,
@@ -813,7 +895,7 @@ fun FloatingSearchBar(
     val containerColor = if (liquidGlassMode) {
         MaterialTheme.colorScheme.surface.copy(alpha = 0.10f)
     } else {
-        MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp).copy(alpha = if (fancyBlur) 0.85f else 1f)
+        MaterialTheme.colorScheme.surfaceColorAtElevation(3.dp).copy(alpha = if (fancyBlur) 0.95f else 1f)
     }
 
     Surface(
@@ -824,7 +906,6 @@ fun FloatingSearchBar(
         modifier = modifier
             .fillMaxWidth()
             .height(56.dp)
-            .glassyBlur(enabled = fancyBlur, radius = 25f)
             .testTag("floating_search_bar")
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -1108,6 +1189,7 @@ fun EmptyStateView(
 fun AlbumsTab(
     viewModel: GalleryViewModel,
     onMediaClick: (MediaItem) -> Unit,
+    onCategoryClick: (String, List<MediaItem>) -> Unit,
     onOpenVault: () -> Unit,
     onOpenTrash: () -> Unit
 ) {
@@ -1149,10 +1231,10 @@ fun AlbumsTab(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            SmartCategoryCard("Videos", videos, Icons.Outlined.PlayCircle, onMediaClick)
-            SmartCategoryCard("Favorites", favItems, Icons.Outlined.FavoriteBorder, onMediaClick)
-            SmartCategoryCard("Selfies", selfies, Icons.Outlined.Face, onMediaClick)
-            SmartCategoryCard("Panoramas", panoramas, Icons.Outlined.CropFree, onMediaClick)
+            SmartCategoryCard("Videos", videos, Icons.Outlined.PlayCircle, onClick = { onCategoryClick("Videos", videos) })
+            SmartCategoryCard("Favorites", favItems, Icons.Outlined.FavoriteBorder, onClick = { onCategoryClick("Favorites", favItems) })
+            SmartCategoryCard("Selfies", selfies, Icons.Outlined.Face, onClick = { onCategoryClick("Selfies", selfies) })
+            SmartCategoryCard("Panoramas", panoramas, Icons.Outlined.CropFree, onClick = { onCategoryClick("Panoramas", panoramas) })
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -1192,7 +1274,7 @@ fun AlbumsTab(
                                     name = folder.name,
                                     count = folder.items.size,
                                     coverMedia = folder.items.firstOrNull(),
-                                    onClick = { folder.items.firstOrNull()?.let { onMediaClick(it) } }
+                                    onClick = { onCategoryClick(folder.name, folder.items) }
                                 )
                             }
                         }
@@ -1299,7 +1381,7 @@ fun SmartCategoryCard(
     title: String,
     items: List<MediaItem>,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: (MediaItem) -> Unit,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -1307,7 +1389,7 @@ fun SmartCategoryCard(
         modifier = modifier
             .width(130.dp)
             .height(130.dp)
-            .clickable { if (items.isNotEmpty()) onClick(items.first()) }
+            .clickable { onClick() }
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             val cover = items.firstOrNull()
@@ -2133,5 +2215,116 @@ fun Modifier.glassyBlur(enabled: Boolean = true, radius: Float = 25f): Modifier 
         }
     } else {
         this.blur(radius.dp)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun CategoryGalleryScreen(
+    title: String,
+    items: List<MediaItem>,
+    viewModel: GalleryViewModel,
+    onMediaClick: (MediaItem) -> Unit,
+    onBack: () -> Unit
+) {
+    val columnCount by viewModel.columnCount.collectAsState()
+    val gridMode by viewModel.gridMode.collectAsState()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { 
+                    Column {
+                        Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                        Text("${items.size} items", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
+            )
+        }
+    ) { paddingValues ->
+        if (items.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("No items found in this category")
+            }
+        } else {
+            val groupedByDate = remember(items) {
+                val sdf = java.text.SimpleDateFormat("MMMM d, yyyy", java.util.Locale.getDefault())
+                items.groupBy { item ->
+                    sdf.format(java.util.Date(item.dateAdded * 1000L))
+                }
+            }
+
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+            ) {
+                LazyColumn(
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    groupedByDate.forEach { (date, groupItems) ->
+                        stickyHeader(key = "category_header_$date") {
+                            Surface(
+                                color = MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = date,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                )
+                            }
+                        }
+
+                        val chunkedItems = groupItems.chunked(columnCount)
+                        itemsIndexed(
+                            items = chunkedItems,
+                            key = { rowIndex, rowItems -> "cat_row_${date}_${rowIndex}_${rowItems.firstOrNull()?.id ?: 0}" }
+                        ) { rowIndex, rowItems ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                for (item in rowItems) {
+                                    Box(
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        PhotoGridItem(
+                                            mediaItem = item,
+                                            onClick = { onMediaClick(item) },
+                                            viewModel = viewModel,
+                                            gridMode = gridMode,
+                                            index = rowIndex * columnCount + rowItems.indexOf(item)
+                                        )
+                                    }
+                                }
+                                val emptySlots = columnCount - rowItems.size
+                                if (emptySlots > 0) {
+                                    Spacer(modifier = Modifier.weight(emptySlots.toFloat()))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

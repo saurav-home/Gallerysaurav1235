@@ -55,13 +55,44 @@ class MainActivity : FragmentActivity() {
         setContent {
             val viewModel: GalleryViewModel = viewModel()
             val themeMode by viewModel.themeMode.collectAsState()
+            val colorPalette by viewModel.colorPalette.collectAsState()
+            val useAmoledMode by viewModel.useAmoledMode.collectAsState()
             val isDark = when (themeMode) {
                 "light" -> false
                 "dark" -> true
                 else -> androidx.compose.foundation.isSystemInDarkTheme()
             }
 
-            MyApplicationTheme(darkTheme = isDark) {
+            LaunchedEffect(isDark, useAmoledMode) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (isDark) {
+                        androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        androidx.activity.SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        )
+                    },
+                    navigationBarStyle = if (isDark) {
+                        if (useAmoledMode) {
+                            androidx.activity.SystemBarStyle.dark(android.graphics.Color.BLACK)
+                        } else {
+                            androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                        }
+                    } else {
+                        androidx.activity.SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        )
+                    }
+                )
+            }
+
+            MyApplicationTheme(
+                darkTheme = isDark,
+                colorPalette = colorPalette,
+                useAmoledMode = useAmoledMode
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

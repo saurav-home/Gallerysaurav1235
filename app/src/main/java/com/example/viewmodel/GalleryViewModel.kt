@@ -70,7 +70,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     val columnCount: StateFlow<Int> = _columnCount.asStateFlow()
 
     // Set of IDs of favorited items (since this is client-side, we store favorites in state)
-    private val _favoriteIds = MutableStateFlow<Set<Long>>(emptySet())
+    private val _favoriteIds = MutableStateFlow<Set<Long>>(loadFavoriteIdsFromPrefs())
     val favoriteIds: StateFlow<Set<Long>> = _favoriteIds.asStateFlow()
 
     // --- MODULE 5: SETTINGS CONFIGURATION ENGINE ---
@@ -267,6 +267,16 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
     private fun saveVaultIdsToPrefs(set: Set<Long>) {
         val stringSet = set.map { it.toString() }.toSet()
         prefs.edit().putStringSet("vault_ids_v2", stringSet).apply()
+    }
+
+    private fun loadFavoriteIdsFromPrefs(): Set<Long> {
+        val set = prefs.getStringSet("favorite_ids_v2", emptySet()) ?: emptySet()
+        return set.mapNotNull { it.toLongOrNull() }.toSet()
+    }
+
+    private fun saveFavoriteIdsToPrefs(set: Set<Long>) {
+        val stringSet = set.map { it.toString() }.toSet()
+        prefs.edit().putStringSet("favorite_ids_v2", stringSet).apply()
     }
 
     private fun loadHardDeletedIdsFromPrefs(): Set<Long> {
@@ -497,6 +507,7 @@ class GalleryViewModel(application: Application) : AndroidViewModel(application)
             currentFavorites.add(itemId)
         }
         _favoriteIds.value = currentFavorites
+        saveFavoriteIdsToPrefs(currentFavorites)
     }
 
     fun deleteItem(itemId: Long) {

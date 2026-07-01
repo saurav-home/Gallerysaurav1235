@@ -1025,17 +1025,6 @@ fun MediaViewerSettingsPage(
                     )
                     Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 16.dp))
                     SubPreferenceToggle(
-                        title = "Auto-Play Videos",
-                        subtitle = "Instantly play local video files without tapping the trigger",
-                        icon = Icons.Outlined.SlowMotionVideo,
-                        checked = videoAutoPlay,
-                        onCheckedChange = {
-                            triggerHaptic()
-                            viewModel.setVideoAutoPlay(it)
-                        }
-                    )
-                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), modifier = Modifier.padding(horizontal = 16.dp))
-                    SubPreferenceToggle(
                         title = "Mute Videos by Default",
                         subtitle = "Initially mute audio streams on all video file playback",
                         icon = Icons.Outlined.VolumeMute,

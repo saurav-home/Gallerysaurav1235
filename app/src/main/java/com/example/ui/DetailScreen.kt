@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +36,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.example.model.MediaItem
@@ -91,7 +96,11 @@ fun DetailScreen(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var isFavorite = mediaItem.isFavorite
+    
+    val favoriteIds by viewModel.favoriteIds.collectAsState()
+    val isFavorite = remember(favoriteIds, itemId) {
+        favoriteIds.contains(itemId)
+    }
 
     // Immersive mode: toggles toolbars visibility on single tap
     var showToolbars by remember { mutableStateOf(true) }
@@ -294,7 +303,11 @@ fun DetailScreen(
                 }
         ) {
             if (mediaItem.isVideo) {
-                VideoPlayer(uriString = mediaItem.uri.toString())
+                VideoPlayer(
+                    uriString = mediaItem.uri.toString(),
+                    showControls = showToolbars,
+                    onToggleControls = { showToolbars = !showToolbars }
+                )
             } else {
                 AsyncImage(
                     model = mediaItem.uri,
@@ -344,6 +357,7 @@ fun DetailScreen(
             BottomActionBarOverlay(
                 isFavorite = isFavorite,
                 heartScale = heartScale,
+                isVideo = mediaItem.isVideo,
                 onFavoriteToggle = {
                     viewModel.toggleFavorite(mediaItem.id)
                     isFavoriteClicked = true
@@ -795,30 +809,215 @@ fun DetailScreen(
     }
 }
 
+private fun formatTime(millis: Long): String {
+    val totalSeconds = millis / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
+}
+
 @Composable
-fun VideoPlayer(uriString: String, modifier: Modifier = Modifier) {
+fun VideoPlayer(
+    uriString: String,
+    showControls: Boolean,
+    onToggleControls: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
-    AndroidView(
-        factory = { ctx ->
-            VideoView(ctx).apply {
-                val controller = MediaController(ctx)
-                controller.setAnchorView(this)
-                setMediaController(controller)
-                setVideoPath(uriString)
-                setOnPreparedListener { mediaPlayer ->
-                    mediaPlayer.isLooping = true
-                    start()
-                }
+    var isPlaying by remember { mutableStateOf(false) }
+    var currentPosition by remember { mutableStateOf(0L) }
+    var duration by remember { mutableStateOf(0L) }
+    var isMuted by remember { mutableStateOf(false) }
+    var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
+    var isPrepared by remember { mutableStateOf(false) }
+    var mediaPlayerRef by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+
+    // Periodic progress update
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            videoViewRef?.let {
+                currentPosition = it.currentPosition.toLong()
             }
-        },
-        update = { videoView ->
-            videoView.setVideoPath(uriString)
-            videoView.start()
-        },
+            delay(200)
+        }
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .testTag("video_player")
-    )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                onToggleControls()
+            }
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                VideoView(ctx).apply {
+                    setVideoPath(uriString)
+                    setOnPreparedListener { mp ->
+                        mediaPlayerRef = mp
+                        mp.isLooping = true
+                        duration = mp.duration.toLong()
+                        isPrepared = true
+                        
+                        val vol = if (isMuted) 0f else 1f
+                        mp.setVolume(vol, vol)
+                    }
+                    setOnCompletionListener {
+                        isPlaying = false
+                    }
+                    videoViewRef = this
+                }
+            },
+            update = { videoView ->
+                // Guard against constantly resetting video path on recompositions
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Custom Premium Glassmorphic Controls Overlay
+        AnimatedVisibility(
+            visible = showControls,
+            enter = fadeIn(animationSpec = tween(400)) + expandVertically(expandFrom = Alignment.Bottom, animationSpec = tween(400)),
+            exit = fadeOut(animationSpec = tween(400)) + shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = tween(400)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Black.copy(alpha = 0.5f),
+                                Color.Transparent,
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.75f)
+                            )
+                        )
+                    )
+            ) {
+                // Expressive, premium play/pause button in center
+                Box(
+                    modifier = Modifier.align(Alignment.Center)
+                ) {
+                    val playButtonScale by animateFloatAsState(
+                        targetValue = if (showControls) 1.0f else 0.8f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "play_button_scale"
+                    )
+
+                    Surface(
+                        onClick = {
+                            videoViewRef?.let { view ->
+                                if (isPlaying) {
+                                    view.pause()
+                                    isPlaying = false
+                                } else {
+                                    view.start()
+                                    isPlaying = true
+                                }
+                            }
+                        },
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.6f),
+                        contentColor = Color.White,
+                        border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .size(76.dp)
+                            .graphicsLayer {
+                                scaleX = playButtonScale
+                                scaleY = playButtonScale
+                            }
+                            .shadow(16.dp, CircleShape),
+                        tonalElevation = 8.dp
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                modifier = Modifier.size(40.dp),
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
+
+                // Beautifully designed custom slider and timer layout at bottom
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 104.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Monospaced premium design for video times
+                        Text(
+                            text = "${formatTime(currentPosition)} / ${formatTime(duration)}",
+                            color = Color.White.copy(alpha = 0.95f),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        // Mute button with micro-interaction feedback
+                        IconButton(
+                            onClick = {
+                                isMuted = !isMuted
+                                mediaPlayerRef?.let { mp ->
+                                    val vol = if (isMuted) 0f else 1f
+                                    mp.setVolume(vol, vol)
+                                }
+                            },
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.White.copy(alpha = 0.15f),
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                contentDescription = if (isMuted) "Volume control" else "Mute control",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Expressive material 3 custom seekbar
+                    val sliderPercent = if (duration > 0) currentPosition.toFloat() / duration else 0f
+                    Slider(
+                        value = sliderPercent,
+                        onValueChange = { percent ->
+                            val targetPos = (percent * duration).toLong()
+                            currentPosition = targetPos
+                            videoViewRef?.seekTo(targetPos.toInt())
+                        },
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color.White,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.25f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(16.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -903,9 +1102,47 @@ fun TopAppBarOverlay(
 }
 
 @Composable
+fun BottomBarAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    iconColor: Color = Color.White,
+    scale: Float = 1f
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = iconColor,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.9f),
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
 fun BottomActionBarOverlay(
     isFavorite: Boolean,
     heartScale: Float,
+    isVideo: Boolean,
     onFavoriteToggle: () -> Unit,
     onShareClick: () -> Unit,
     onEditClick: () -> Unit,
@@ -917,7 +1154,7 @@ fun BottomActionBarOverlay(
         modifier = modifier
             .navigationBarsPadding()
             .padding(bottom = 24.dp)
-            .padding(horizontal = 12.dp)
+            .padding(horizontal = 16.dp)
             .fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
@@ -930,91 +1167,54 @@ fun BottomActionBarOverlay(
                 color = Color.White.copy(alpha = 0.15f)
             ),
             modifier = Modifier
-                .height(68.dp)
+                .height(72.dp)
                 .fillMaxWidth()
                 .shadow(16.dp, RoundedCornerShape(32.dp))
                 .testTag("bottom_action_bar_detail")
         ) {
             Row(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Share
-                IconButton(onClick = onShareClick) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Outlined.Share,
-                            contentDescription = "Share",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("Share", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp)
-                    }
-                }
+                BottomBarAction(
+                    icon = Icons.Outlined.Share,
+                    label = "Share",
+                    onClick = onShareClick
+                )
 
                 // Edit
-                IconButton(onClick = onEditClick) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Outlined.Edit,
-                            contentDescription = "Edit",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("Edit", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp)
-                    }
+                if (!isVideo) {
+                    BottomBarAction(
+                        icon = Icons.Outlined.Edit,
+                        label = "Edit",
+                        onClick = onEditClick
+                    )
                 }
 
                 // Favorite
-                IconButton(onClick = onFavoriteToggle) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.graphicsLayer {
-                            scaleX = heartScale
-                            scaleY = heartScale
-                        }
-                    ) {
-                        Icon(
-                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = "Favorite",
-                            tint = if (isFavorite) Color.Red else Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("Favorite", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp)
-                    }
-                }
+                BottomBarAction(
+                    icon = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                    label = "Favorite",
+                    onClick = onFavoriteToggle,
+                    iconColor = if (isFavorite) Color.Red else Color.White,
+                    scale = heartScale
+                )
 
                 // Delete
-                IconButton(onClick = onDeleteClick) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Outlined.Delete,
-                            contentDescription = "Delete",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("Delete", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp)
-                    }
-                }
+                BottomBarAction(
+                    icon = Icons.Outlined.Delete,
+                    label = "Delete",
+                    onClick = onDeleteClick
+                )
 
                 // More
-                IconButton(onClick = onMoreClick) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "More Options",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("More", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp)
-                    }
-                }
+                BottomBarAction(
+                    icon = Icons.Default.MoreVert,
+                    label = "More",
+                    onClick = onMoreClick
+                )
             }
         }
     }

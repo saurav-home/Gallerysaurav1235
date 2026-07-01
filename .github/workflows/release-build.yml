@@ -1,0 +1,60 @@
+name: Build Prism Release App
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers the build automatically when you push a version tag like v1.0.0
+  workflow_dispatch: # Allows you to manually trigger the build from the GitHub Actions tab
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # Caching Gradle dependencies to speed up execution time
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant Execute Permission to Gradle Wrapper
+        run: chmod +x gradlew
+
+      # Builds the production release version (R8/ProGuard shrinks code automatically here)
+      - name: Build Release APK and App Bundle (AAB)
+        run: ./gradlew assembleRelease bundleRelease
+
+      # Signs the built production files using your repository credentials
+      - name: Sign Release Artifacts
+        id: sign_app
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      # Uploads the final tiny release binary as a GitHub Action artifact
+      - name: Upload Signed Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prism-Release-APK
+          path: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          retention-days: 7
+
+      - name: Upload Release App Bundle (AAB)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prism-Release-AAB
+          path: app/build/outputs/bundle/release/app-release.aab
+          retention-days: 7

@@ -1,0 +1,6 @@
+{
+  "name": "Prism",
+  "description": "Prism is a secure, high-performance offline local device gallery featuring a Floating Pill navigation bar, premium custom dynamic settings, biometric vault, and desktop-class gestures.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
